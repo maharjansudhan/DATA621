@@ -1,0 +1,120 @@
+---
+title: "DATA621_HW5"
+author: "Sudhan Maharjan"
+date: "11/26/2019"
+output: html_document
+---
+
+                
+Overview
+In this homework assignment, you will explore, analyze and model a data set containing information on approximately 12,000 commercially available wines. The variables are mostly related to the chemical properties of the wine being sold. The response variable is the number of sample cases of wine that were purchased by wine distribution companies after sampling a wine. These cases would be used to provide tasting samples to restaurants and wine stores around the United States. The more sample cases purchased, the more likely is a wine to be sold at a high end restaurant. A large wine manufacturer is studying the data in order to predict the number of wine cases ordered based upon the wine characteristics. If the wine manufacturer can predict the number of cases, then that manufacturer will be able to adjust their wine offering to maximize sales.
+Your objective is to build a count regression model to predict the number of cases of wine that will be sold given certain properties of the wine. HINT: Sometimes, the fact that a variable is missing is actually predictive of the target. You can only use the variables given to you (or variables that you derive from the variables provided). 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(caret)
+library(knitr)
+library(pROC)
+library(ROCit)
+library(dplyr)
+library(skimr)
+library(corrplot)
+library(ggplot2)
+library(DataExplorer)
+
+eva <- read_csv("https://raw.githubusercontent.com/maharjansudhan/DATA621/master/wine-evaluation-data.csv")
+head(eva)
+train <- read_csv("https://raw.githubusercontent.com/maharjansudhan/DATA621/master/wine-training-data.csv")
+head(train)
+
+
+```
+
+```{r}
+theme_update(plot.title = element_text(hjust = 0.5), 
+             axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+#we are not including some values
+train$INDEX <- NULL
+eva$IN <- NULL
+eva$TARGET <- NULL
+```
+
+1. DATA EXPLORATION (25 Points)
+Describe the size and the variables in the wine training data set. Consider that too much detail will cause a manager to lose interest while too little detail will make the manager consider that you aren’t doing your job. Some suggestions are given below. Please do NOT treat this as a check list of things to do to complete the assignment. You should have your own thoughts on what to tell the boss. These are just ideas.
+a. Mean / Standard Deviation / Median
+b. Bar Chart or Box Plot of the data
+c. Is the data correlated to the target variable (or to other variables?)
+d. Are any of the variables missing and need to be imputed “fixed”?
+
+```{r}
+#skim(train)
+train %>%
+  skim()
+```
+
+There are 12,795 rows and 15 columns. 8200 values missing in the given dataset.
+
+## Histogram
+```{r, echo=FALSE, warning=FALSE}
+#Histogram
+plot_histogram(train)
+```
+
+
+2. DATA PREPARATION (25 Points)
+Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations.
+a. Fix missing values (maybe with a Mean or Median value)
+b. Create flags to suggest if a variable was missing
+c. Transform data by putting it into buckets
+d. Mathematical transforms such as log or square root (or use Box-Cox)
+e. Combine variables (such as ratios or adding or multiplying) to create new variables
+
+As we can see there are 8200 values missing and there are negative values, we will need to conduct some steps to take care of these missing values.
+
+```{r}
+#to fix the negative values we can give the absolute value of those numbers since we don't have the exact info why they have negative value
+
+train$VolatileAcidity <- abs(train$VolatileAcidity)
+eva$VolatileAcidity <- abs(eva$VolatileAcidity)
+
+train$FixedAcidity <- abs(train$FixedAcidity)
+eva$FixedAcidity <- abs(eva$FixedAcidity)
+
+train$CitricAcid <- abs(train$CitricAcid)
+eva$CitricAcid <- abs(eva$CitricAcid)
+
+train$ResidualSugar <- abs(train$ResidualSugar)
+eva$ResidualSugar <- abs(eva$ResidualSugar)
+
+train$Chlorides <- abs(train$Chlorides)
+eva$Chlorides <- abs(eva$Chlorides)
+
+train$Sulphates <- abs(train$Sulphates)
+eva$Sulphates <- abs(eva$Sulphates)
+
+train$FreeSulfurDioxide <- abs(train$FreeSulfurDioxide)
+eva$FreeSulfurDioxide <- abs(eva$FreeSulfurDioxide)
+
+train$TotalSulfurDioxide <- abs(train$TotalSulfurDioxide)
+eva$TotalSulfurDioxide <- abs(eva$TotalSulfurDioxide)
+
+```
+
+```{r}
+#for missing data let's see it graphically
+plot_missing(train)
+```
+
+3. BUILD MODELS (25 Points)
+Using the training data set, build at least two different poisson regression models, at least two different negative binomial regression models, and at least two multiple linear regression models, using different variables (or the same variables with different transformations). Sometimes poisson and negative binomial regression models give the same results. If that is the case, comment on that. Consider changing the input variables if that occurs so that you get different models. Although not covered in class, you may also want to consider building zero-inflated poisson and negative binomial regression models. You may select the variables manually, use an approach such as Forward or Stepwise, use a different approach such as trees, or use a combination of techniques. Describe the techniques you used. If you manually selected a variable for inclusion into the model or exclusion into the model, indicate why this was done.
+Discuss the coefficients in the models, do they make sense? In this case, about the only thing you can comment on is the number of stars and the wine label appeal. However, you might comment on the coefficient and magnitude of variables and how they are similar or different from model to model. For example, you might say “pH seems to have a major positive impact in my poisson regression model, but a negative effect in my multiple linear regression model”. Are you keeping the model even though it is counter intuitive? Why? The boss needs to know.
+
+
+
+4. SELECT MODELS (25 Points)
+Decide on the criteria for selecting the best count regression model. Will you select models with slightly worse performance if it makes more sense or is more parsimonious? Discuss why you selected your models.
+For the count regression model, will you use a metric such as AIC, average squared error, etc.? Be sure to explain how you can make inferences from the model, and discuss other relevant model output. If you like the multiple linear regression model the best, please say why. However, you must select a count regression model for model deployment. Using the training data set, evaluate the performance of the count regression model. Make predictions using the evaluation data set.
