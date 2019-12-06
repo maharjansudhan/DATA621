@@ -1,0 +1,355 @@
+---
+title: "DATA621_HW5"
+author: "Calvin Wong, Juanelle Marks, Kevin Benson, Ravi Itwaru, Sudhan Maharjan"
+date: "11/26/2019"
+output: html_document
+---
+
+                
+Overview
+In this homework assignment, you will explore, analyze and model a data set containing information on approximately 12,000 commercially available wines. The variables are mostly related to the chemical properties of the wine being sold. The response variable is the number of sample cases of wine that were purchased by wine distribution companies after sampling a wine. These cases would be used to provide tasting samples to restaurants and wine stores around the United States. The more sample cases purchased, the more likely is a wine to be sold at a high end restaurant. A large wine manufacturer is studying the data in order to predict the number of wine cases ordered based upon the wine characteristics. If the wine manufacturer can predict the number of cases, then that manufacturer will be able to adjust their wine offering to maximize sales.
+Your objective is to build a count regression model to predict the number of cases of wine that will be sold given certain properties of the wine. HINT: Sometimes, the fact that a variable is missing is actually predictive of the target. You can only use the variables given to you (or variables that you derive from the variables provided). 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(caret)
+library(knitr)
+library(pROC)
+library(ROCit)
+library(dplyr)
+library(skimr)
+library(corrplot)
+library(ggplot2)
+library(DataExplorer)
+library(dplyr)
+library(pander)
+library(e1071) 
+library(reshape2)
+library(foreign)
+library(MASS)
+```
+
+
+```{r}
+eva <- read_csv("https://raw.githubusercontent.com/maharjansudhan/DATA621/master/wine-evaluation-data.csv")
+
+
+train <- read_csv("https://raw.githubusercontent.com/maharjansudhan/DATA621/master/wine-training-data.csv")
+
+```
+
+#Data Exploration of train and eva
+
+
+###Train before transformations
+See below preview of train dataset:
+```{r}
+head(train)
+dim(train)
+```
+
+
+```{r}
+#Remove column index from train
+train$INDEX <- NULL
+```
+
+See below structure of dataset:
+```{r}
+str(train)
+```
+
+See below summary of train dataset:
+```{r}
+summary(train)
+```
+
+Most of the variables appear to be numerical continuous.However, there are a few that are numerical ordinal. These are TARGET, AcidIndex and LabelAppeaL
+
+
+######Summary table
+```{r}
+means <- sapply(train, function(y) mean(y, na.rm = TRUE))
+mins <- sapply(train, function(y) min(y, na.rm=TRUE))
+medians <- sapply(train, function(y) median(y, na.rm = TRUE))
+maxs <- sapply(train, function(y) max(y, na.rm=TRUE))
+IQRs <- sapply(train, function(y) IQR(y, na.rm = TRUE))
+SDs <- sapply(train, function(y) sd(y, na.rm = T))
+skews <- sapply(train, function(y) skewness(y, na.rm = TRUE))
+cors <- as.vector(cor(train$TARGET, train[ , 1:ncol(train)], use = "complete.obs"))
+NAs <- sapply(train, function(y) sum(length(which(is.na(y)))))
+datasummary <- data.frame(means, mins, medians, maxs, IQRs, SDs, skews, cors, NAs)
+colnames(datasummary) <- c("MEAN", "MIN","MEDIAN", "MAX", "IQR", "STD. DEV","SKEW", "$r_{TARGET}$", "NAs")
+datasummary <- round(datasummary, 2)
+pander(datasummary)
+
+```
+
+Eight of the variables have missing data. The highest missing values are for the STARS variable
+
+####Plot of missing data
+```{r}
+#for missing data let's see it graphically
+plot_missing(train)
+```
+
+####Distribution of  all variables
+
+######Histograms
+
+See below distribution of all variables in train:
+```{r}
+
+d <- melt(train[,sapply(train, is.numeric)])
+ggplot(d,aes(x = value)) + 
+    facet_wrap(~variable,scales = "free") + 
+    geom_histogram()
+```
+
+Majority of the variables  appear normally distributed.
+
+
+######Boxplots
+
+See below  box plot visualisation of variables:
+```{r}
+ggplot(d, aes(variable, value)) + 
+  facet_wrap(~variable,scales = "free") + 
+  geom_boxplot()
+```
+
+
+
+######Distribution of target variable
+The target variable is a count variable, indicating the number of sample cases. The distribution below indicates that the distribution has a lot of ZERO values, which would indicate 'no sample purchased'. This  appears to be a poisson distribution. 
+```{r}
+ggplot(train, aes(x=TARGET)) + geom_histogram(binwidth = 0.5)+ theme(axis.text=element_text(size=10), axis.title=element_text(size=10))
+
+```
+
+
+####Correlations
+(To be explained)
+```{r}
+library(corrplot)
+
+cor(drop_na(train))
+corrplot(cor(drop_na(train)), method="circle")
+
+
+```
+
+
+
+
+
+
+###Eva before transformations
+See below preview of eva dataset:
+```{r}
+head(eva)
+dim(eva)
+```
+
+
+
+```{r}
+#we are not including some values
+eva$IN <- NULL
+eva$TARGET <- NULL
+```
+
+
+
+```{r}
+head(eva)
+```
+
+
+```{r}
+str(eva)
+```
+
+
+```{r}
+summary(eva)
+```
+
+
+```{r}
+d <- melt(eva[,sapply(eva, is.numeric)])
+ggplot(d,aes(x = value)) + 
+    facet_wrap(~variable,scales = "free") + 
+    geom_histogram()
+```
+
+
+
+2. DATA PREPARATION (25 Points)
+Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations.
+a. Fix missing values (maybe with a Mean or Median value)
+b. Create flags to suggest if a variable was missing
+c. Transform data by putting it into buckets
+d. Mathematical transforms such as log or square root (or use Box-Cox)
+e. Combine variables (such as ratios or adding or multiplying) to create new variables
+
+As we can see there are 8200 values missing and there are negative values, we will need to conduct some steps to take care of these missing values.
+
+#####Negative Values
+```{r}
+#to fix the negative values we can give the absolute value of those numbers since we don't have the exact info why they have negative value
+
+train$VolatileAcidity <- abs(train$VolatileAcidity)
+eva$VolatileAcidity <- abs(eva$VolatileAcidity)
+
+train$FixedAcidity <- abs(train$FixedAcidity)
+eva$FixedAcidity <- abs(eva$FixedAcidity)
+
+train$CitricAcid <- abs(train$CitricAcid)
+eva$CitricAcid <- abs(eva$CitricAcid)
+
+train$ResidualSugar <- abs(train$ResidualSugar)
+eva$ResidualSugar <- abs(eva$ResidualSugar)
+
+train$Chlorides <- abs(train$Chlorides)
+eva$Chlorides <- abs(eva$Chlorides)
+
+train$Sulphates <- abs(train$Sulphates)
+eva$Sulphates <- abs(eva$Sulphates)
+
+train$FreeSulfurDioxide <- abs(train$FreeSulfurDioxide)
+eva$FreeSulfurDioxide <- abs(eva$FreeSulfurDioxide)
+
+train$TotalSulfurDioxide <- abs(train$TotalSulfurDioxide)
+eva$TotalSulfurDioxide <- abs(eva$TotalSulfurDioxide)
+
+```
+
+
+
+Imputing the NA's of the training and evaluation data with the mean of those variables.
+
+```{r}
+# Training data
+train$pH[is.na(train$pH)] <- round(mean(train$pH, na.rm=TRUE))
+train$ResidualSugar[is.na(train$ResidualSugar)] <- round(mean(train$ResidualSugar, na.rm=TRUE))
+train$Chlorides[is.na(train$Chlorides)] <- round(mean(train$Chlorides, na.rm=TRUE))
+train$FreeSulfurDioxide[is.na(train$FreeSulfurDioxide)] <- round(mean(train$FreeSulfurDioxide, na.rm=TRUE))
+train$Alcohol[is.na(train$Alcohol)] <- round(mean(train$Alcohol, na.rm=TRUE))
+train$TotalSulfurDioxide[is.na(train$TotalSulfurDioxide)] <- round(mean(train$TotalSulfurDioxide, na.rm=TRUE))
+train$Sulphates[is.na(train$Sulphates)] <- round(mean(train$Sulphates, na.rm=TRUE))
+train$STARS[is.na(train$STARS)] <- round(mean(train$STARS, na.rm=TRUE), digits = 0)
+
+# Evaluation data
+eva$pH[is.na(eva$pH)] <- round(mean(eva$pH, na.rm=TRUE))
+eva$ResidualSugar[is.na(eva$ResidualSugar)] <- round(mean(eva$ResidualSugar, na.rm=TRUE))
+eva$Chlorides[is.na(eva$Chlorides)] <- round(mean(eva$Chlorides, na.rm=TRUE))
+eva$FreeSulfurDioxide[is.na(eva$FreeSulfurDioxide)] <- round(mean(eva$FreeSulfurDioxide, na.rm=TRUE))
+eva$Alcohol[is.na(eva$Alcohol)] <- round(mean(eva$Alcohol, na.rm=TRUE))
+eva$TotalSulfurDioxide[is.na(eva$TotalSulfurDioxide)] <- round(mean(eva$TotalSulfurDioxide, na.rm=TRUE))
+eva$Sulphates[is.na(eva$Sulphates)] <- round(mean(eva$Sulphates, na.rm=TRUE))
+eva$STARS[is.na(eva$STARS)] <- round(mean(eva$STARS, na.rm=TRUE), digits = 0)
+
+plot_missing(train)
+```
+
+###Models
+
+3. BUILD MODELS (25 Points)
+Using the training data set, build at least two different poisson regression models, at least two different negative binomial regression models, and at least two multiple linear regression models, using different variables (or the same variables with different transformations). Sometimes poisson and negative binomial regression models give the same results. If that is the case, comment on that. Consider changing the input variables if that occurs so that you get different models. Although not covered in class, you may also want to consider building zero-inflated poisson and negative binomial regression models. You may select the variables manually, use an approach such as Forward or Stepwise, use a different approach such as trees, or use a combination of techniques. Describe the techniques you used. If you manually selected a variable for inclusion into the model or exclusion into the model, indicate why this was done.
+Discuss the coefficients in the models, do they make sense? In this case, about the only thing you can comment on is the number of stars and the wine label appeal. However, you might comment on the coefficient and magnitude of variables and how they are similar or different from model to model. For example, you might say "pH seems to have a major positive impact in my poisson regression model, but a negative effect in my multiple linear regression model". Are you keeping the model even though it is counter intuitive? Why? The boss needs to know.
+
+##Model 1 - Our kitchen sink regression. 
+This model basically has all the predictor variables.
+
+```{r}
+mod1 <- glm(TARGET ~. , data = train)
+(mod1sum <- summary(mod1))
+```
+
+##Model2- A poisson regression model
+
+```{r}
+mod2 <- glm(TARGET ~., family=poisson, data=train)
+(mod2sum <- summary(mod2))
+```
+
+##Model3 - Stepwise regression model of model: mod2
+
+```{r}
+mod3 <- step(mod2, direction = "backward")
+(mod3sum <- summary(mod3))
+```
+
+##Model 4- Poisson model with only significant variables
+
+```{r}
+model4 = glm(TARGET ~  .-FixedAcidity-CitricAcid-ResidualSugar-Chlorides-FreeSulfurDioxide-TotalSulfurDioxide-Density-pH-Sulphates-Alcohol, data=train, family=poisson)
+summary(model4)
+plot(model4) 
+```
+
+###Model 5- Negative binomial
+```{r}
+model5 <- glm.nb(TARGET ~ ., data = train)
+summary(model5)
+plot(model5)
+```
+
+
+
+## Model 6- Negative binomial with significant variables
+```{r}
+model6 <- glm.nb(TARGET ~ .-FixedAcidity-CitricAcid-ResidualSugar-Chlorides-FreeSulfurDioxide-TotalSulfurDioxide-Density-pH-Sulphates-Alcohol, data = train)
+summary(model6)
+plot(model6)
+```
+
+
+##Model 7 -Multiple linear regression
+```{r}
+model7 <- lm(TARGET ~ .-FixedAcidity-CitricAcid-ResidualSugar, data = train)
+summary(model7)
+plot(model7)
+```
+
+##Model 8- Zero inflated poisson regression model
+```{r}
+library(pscl)
+model8 <-zeroinfl(formula = TARGET ~ STARS + LabelAppeal + AcidIndex + VolatileAcidity + TotalSulfurDioxide + Chlorides + Density,  data = train, dist = "poisson")
+summary(model8)
+
+```
+
+
+
+
+4. SELECT MODELS (25 Points)
+Decide on the criteria for selecting the best count regression model. Will you select models with slightly worse performance if it makes more sense or is more parsimonious? Discuss why you selected your models.
+For the count regression model, will you use a metric such as AIC, average squared error, etc.? Be sure to explain how you can make inferences from the model, and discuss other relevant model output. If you like the multiple linear regression model the best, please say why. However, you must select a count regression model for model deployment. Using the training data set, evaluate the performance of the count regression model. Make predictions using the evaluation data set.
+
+```{r}
+summary(eva)
+```
+
+Yes, any analyst would definitely select a models that best suites the dataset even though it has a slightly worse performance. The model doesn't mean that you have to only show the good things about the data. You should be able to show what the dataset is trying to tell you. If you have the good anlaysis of a dataset, you can predict the best model and give the best fitted solution for that model.
+
+Model 1 has the lowest AIC = 48844.
+
+```{r}
+#histogram for prediction basic model 1
+final_preds_basic <- predict(mod1, eva)
+finaldf <- cbind(TARGET_FLAG=final_preds_basic)
+hist(final_preds_basic)
+```
+
+Compared with the training dataset, Model8(zero inflated poisson model) would make a good sense. Zero inflated model is used to model count data which has excess zero values. 
+
+```{r}
+#histogram for predictions (zero inflated poisson)
+final_preds <- predict(model8, eva)
+finaldf <- cbind(TARGET_FLAG=final_preds)
+hist(final_preds)
+```
+
+Both model 1 and model 8 gives similar output but the only issue with Model 8 is not all the zero values are a non-values. Zero value doesn't mean it is a null value. It has a value which is equivalent to 0. 
